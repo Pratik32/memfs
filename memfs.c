@@ -22,11 +22,10 @@ static int memfs_write_inode(struct inode*, struct writeback_control*);
 
 //inode operations.
 static struct dentry* memfs_lookup(struct inode*,struct dentry*,unsigned int);
-
+static int memfs_create(struct inode*,struct dentry*,umode_t,bool);
 
 //file operations.
 static int memfs_open(struct inode*,struct file*);
-
 
 static struct inode* memfs_iget(struct super_block*,unsigned long,umode_t);
 
@@ -43,7 +42,8 @@ struct super_operations memfs_super_operations={
 };
 
 struct inode_operations memfs_inode_operations={
-    .lookup=memfs_lookup
+    .lookup=memfs_lookup,
+    .create=memfs_create
 };
 
 struct file_operations memfs_file_operations={
@@ -91,7 +91,7 @@ static int memfs_fill_super(struct super_block* sb,void* data,int flags){
  * Supports two types of files:directory special & regular file.
  */
 static struct inode* memfs_iget(struct super_block* sb,unsigned long i_no,umode_t flags){
-    struct inode* ip;
+    struct inode *ip;
     printk("Inside:%s i_no=%lu\n",__FUNCTION__,i_no);
     ip=iget_locked(sb,i_no);
 
@@ -130,7 +130,7 @@ static struct inode* memfs_iget(struct super_block* sb,unsigned long i_no,umode_
 static char filename[]="hello.txt";
 static int filename_len=sizeof(filename)-1;
 static struct dentry* memfs_lookup(struct inode* dir,struct dentry* entry,unsigned int flags){
-    struct inode* ip;
+    struct inode *ip;
     printk("Inside: %s\n",__FUNCTION__);
     if(dir->i_ino!=ROOT_INODE || entry->d_name.len!=filename_len){
         printk("%s:Error in memfs_lookup\n",__FUNCTION__);
@@ -140,12 +140,32 @@ static struct dentry* memfs_lookup(struct inode* dir,struct dentry* entry,unsign
             printk("%s:Inode allocation/read failed.\n",__FUNCTION__);
             return ERR_PTR(-ENOMEM);
         }else{
-            ip->i_count+=1;
+            //ip->i_count+=1;
             d_add(entry,ip);
         }
     }
 
     return NULL;
+}
+
+/*
+ *create an inode and attach it to the dentry object.
+ *In our case we are just creating and 'inode' and attaching it to dentry.
+ *In actual,FS must create an entry in given dir inode.
+ */
+static int memfs_create(struct inode *dir,struct dentry *entry,umode_t mode,bool excl){
+    struct inode *ip;
+    printk("Inside: %s\n",__FUNCTION__);
+    ip=memfs_iget(dir->i_sb,2,mode);
+    if(ip){
+        d_instantiate(entry,ip);
+        dget(entry);
+        dir->i_mtime=dir->i_ctime=current_time(dir);
+    }else{
+       printk("%s:Error creating inode\n",__FUNCTION__);
+       return -1;
+    }
+    return 0;
 }
 /* Called during unmounting of FS.
  *
@@ -176,7 +196,5 @@ static void exit_memfs_module(void){
     unregister_filesystem(&memfs);
     printk("exiting...");
 }
-
 module_init(init_memfs_module);
 module_exit(exit_memfs_module);
-
