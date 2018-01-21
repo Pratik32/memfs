@@ -112,15 +112,16 @@ static struct inode* memfs_iget(struct super_block* sb,const struct inode *dir,
     printk("iget_locked excuted successfully.\n");
     printk("Inode number assigned is: %lu",i_no);
 
-    ip->i_fop=&memfs_file_operations;
     ip->i_atime=ip->i_mtime=ip->i_ctime=current_time(ip);
 
     if((flags & S_IFMT) == S_IFDIR){
         printk("%s: Filling a directory file inode\n",__FUNCTION__);    
         ip->i_op=&memfs_dir_inode_operations;
+        ip->i_fop=&simple_dir_operations;
     }else if((flags & S_IFMT)== S_IFREG){
         printk("%s: Filling a regular file inode\n",__FUNCTION__);
         ip->i_op=&memfs_file_inode_operations;
+        ip->i_fop=&memfs_file_operations;
     }
     unlock_new_inode(ip);
     return ip;
