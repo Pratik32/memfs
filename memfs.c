@@ -10,6 +10,8 @@
 MODULE_LICENSE("GPL"); 
 #define ROOT_INODE 1
 #define MEMFS_MAGIC 0xabcd
+
+#define  MEMFS_DEFAULT_FILEMODE  0755
 static struct inode* memfs_root_inode;
 // Functions called during mount/umount.
 static struct dentry* memfs_mount(struct file_system_type*,int,const char*,void*);
@@ -27,7 +29,7 @@ static int memfs_create(struct inode*,struct dentry*,umode_t,bool);
 //file operations.
 static int memfs_open(struct inode*,struct file*);
 
-static struct inode* memfs_iget(struct super_block*,unsigned long,umode_t);
+static struct inode* memfs_iget(struct super_block*,const struct inode*,unsigned long,umode_t);
 
 struct file_system_type memfs={
     .name="memfs",
@@ -41,16 +43,17 @@ struct super_operations memfs_super_operations={
     .write_inode=memfs_write_inode
 };
 
-struct inode_operations memfs_inode_operations={
-    .lookup=memfs_lookup,
+struct inode_operations memfs_dir_inode_operations={
+    .lookup=simple_lookup,
     .create=memfs_create
+};
+struct inode_operations memfs_file_inode_operations={
+    .setattr=simple_setattr,
+    .getattr=simple_getattr
 };
 
 struct file_operations memfs_file_operations={
-    .open=memfs_open,
-    //.read=new_sync_read,
     .read_iter=generic_file_read_iter,
-    //.write=new_sync_write,
     .write_iter=generic_file_write_iter,
     .llseek=generic_file_llseek
 };
@@ -67,6 +70,7 @@ static struct dentry* memfs_mount(struct file_system_type* fs,int flags,
 
 /*  Filesystem filler function which reads superblock from disk
  *  and fills the super_block passed.
+ *  data: mount options passed to superblock filler function.
  */
 static int memfs_fill_super(struct super_block* sb,void* data,int flags){
     printk("Inside memfs_fill_super\n");
@@ -76,7 +80,7 @@ static int memfs_fill_super(struct super_block* sb,void* data,int flags){
     sb->s_type=&memfs;
     sb->s_magic=MEMFS_MAGIC;
     sb->s_op=&memfs_super_operations;
-    memfs_root_inode=memfs_iget(sb,1,S_IFDIR);
+    memfs_root_inode=memfs_iget(sb,NULL,1,S_IFDIR|MEMFS_DEFAULT_FILEMODE);
 
     if(!(sb->s_root=d_make_root(memfs_root_inode))){
         iput(memfs_root_inode);
@@ -90,7 +94,8 @@ static int memfs_fill_super(struct super_block* sb,void* data,int flags){
 /* iget function of memfs.
  * Supports two types of files:directory special & regular file.
  */
-static struct inode* memfs_iget(struct super_block* sb,unsigned long i_no,umode_t flags){
+static struct inode* memfs_iget(struct super_block* sb,const struct inode *dir,
+                                        unsigned long i_no,umode_t flags){
     struct inode *ip;
     printk("Inside:%s i_no=%lu\n",__FUNCTION__,i_no);
     ip=iget_locked(sb,i_no);
@@ -103,19 +108,19 @@ static struct inode* memfs_iget(struct super_block* sb,unsigned long i_no,umode_
         return ip;
     }
 
+    inode_init_owner(ip,dir,flags);
     printk("iget_locked excuted successfully.\n");
     printk("Inode number assigned is: %lu",i_no);
 
-    ip->i_op=&memfs_inode_operations;
     ip->i_fop=&memfs_file_operations;
     ip->i_atime=ip->i_mtime=ip->i_ctime=current_time(ip);
 
-    if(flags & S_IFDIR){
-        printk("%s: Filling a directory file inode\n",__FUNCTION__);
-        ip->i_mode=S_IFDIR|S_IRWXU;
-    }else if(flags & S_IFREG){
+    if((flags & S_IFMT) == S_IFDIR){
+        printk("%s: Filling a directory file inode\n",__FUNCTION__);    
+        ip->i_op=&memfs_dir_inode_operations;
+    }else if((flags & S_IFMT)== S_IFREG){
         printk("%s: Filling a regular file inode\n",__FUNCTION__);
-        ip->i_mode=S_IFREG|S_IRWXU;
+        ip->i_op=&memfs_file_inode_operations;
     }
     unlock_new_inode(ip);
     return ip;
@@ -135,7 +140,7 @@ static struct dentry* memfs_lookup(struct inode* dir,struct dentry* entry,unsign
     if(dir->i_ino!=ROOT_INODE || entry->d_name.len!=filename_len){
         printk("%s:Error in memfs_lookup\n",__FUNCTION__);
     }else{
-        ip=memfs_iget(dir->i_sb,2,S_IFREG);
+        ip=memfs_iget(dir->i_sb,dir,2,S_IFREG);
         if(!ip){
             printk("%s:Inode allocation/read failed.\n",__FUNCTION__);
             return ERR_PTR(-ENOMEM);
@@ -156,7 +161,7 @@ static struct dentry* memfs_lookup(struct inode* dir,struct dentry* entry,unsign
 static int memfs_create(struct inode *dir,struct dentry *entry,umode_t mode,bool excl){
     struct inode *ip;
     printk("Inside: %s\n",__FUNCTION__);
-    ip=memfs_iget(dir->i_sb,2,mode);
+    ip=memfs_iget(dir->i_sb,dir,2,mode);
     if(ip){
         d_instantiate(entry,ip);
         dget(entry);
