@@ -43,6 +43,10 @@ struct super_operations memfs_super_operations={
     .write_inode=memfs_write_inode
 };
 
+/* Seperating the dir and reg file inode functions.
+ * Because some operations are not applicable on 
+ * reg file inode.
+ */
 struct inode_operations memfs_dir_inode_operations={
     .lookup=simple_lookup,
     .create=memfs_create
@@ -52,6 +56,8 @@ struct inode_operations memfs_file_inode_operations={
     .getattr=simple_getattr
 };
 
+// Using generic read ops for now.
+// Will write new ones soon.
 struct file_operations memfs_file_operations={
     .read_iter=generic_file_read_iter,
     .write_iter=generic_file_write_iter,
@@ -93,6 +99,12 @@ static int memfs_fill_super(struct super_block* sb,void* data,int flags){
 
 /* iget function of memfs.
  * Supports two types of files:directory special & regular file.
+ * iget_locked() will check if inode is present in icache, if not
+ * it allocates a new 'inode' pointer.
+ * In actual iget creates  the inode structure associated with the 
+ * given filesystem and hooks it in 'inode' pointer returned by 
+ * iget_locked.Filesystem may maintain an internal inode cache for
+ * peformance increase.
  */
 static struct inode* memfs_iget(struct super_block* sb,const struct inode *dir,
                                         unsigned long i_no,umode_t flags){
@@ -130,6 +142,9 @@ static struct inode* memfs_iget(struct super_block* sb,const struct inode *dir,
 /* memfs_lookup:inode lookup function
  * first argument is directory inode.Second argument is dentry object to which
  * we attach our lookedup inode based on filename.
+ * lookup internally calls iget of  the given filesystem to get the 'inode'
+ * structure and attach it to dentry object.Once we get the dentry filled,
+ * we add it to the dcache.
  * Returns the same dentry object.
  */
 
