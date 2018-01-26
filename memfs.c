@@ -6,6 +6,7 @@
 #include<linux/statfs.h>
 #include<linux/sched.h>
 #include<linux/kernel.h>
+#include "internal.h"
 
 MODULE_LICENSE("GPL"); 
 #define ROOT_INODE 1
@@ -102,7 +103,7 @@ static int memfs_fill_super(struct super_block* sb,void* data,int flags) {
 static struct inode* memfs_iget(struct super_block* sb,const struct inode *dir,
                                         unsigned long i_no,umode_t flags) {
     struct inode *ip;
-    printk("Inside:%s i_no = %lu\n",__FUNCTION__,i_no);
+    DEBUG("Inside:%s i_no = %lu\n",__FUNCTION__,i_no);
     ip = iget_locked(sb,i_no);
 
     if(!ip) {
@@ -141,8 +142,8 @@ static char filename[] = "hello.txt";
 static int filename_len = sizeof(filename)-1;
 static struct dentry* memfs_lookup(struct inode* dir,struct dentry* entry,
                                     unsigned int flags) {
-    printk("Inside: %s\n",__FUNCTION__);
     struct inode *ip;
+    printk("Inside: %s\n",__FUNCTION__);
     if(dir->i_ino != ROOT_INODE || entry->d_name.len != filename_len) {
         printk("%s:Error in memfs_lookup\n",__FUNCTION__);
     } else {
@@ -197,7 +198,7 @@ static int memfs_open(struct inode* ip,struct file* file) {
 
 static int init_memfs_module(void) {
     int err;
-    printk("Inside: %s registering filesystem\n",__FUNCTION__);
+    DEBUG("Inside: %s registering filesystem\n",__FUNCTION__);
     err = register_filesystem(&memfs);
     printk("memfs: err: %d\n",err);
     return err;

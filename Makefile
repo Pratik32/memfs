@@ -1,8 +1,7 @@
 obj-m+=memfs.o
-
+ccflags-y := -I$(src)/.
+all:
+	make -C /lib/modules/`uname -r`/build M=`pwd` modules
 clean:
-	rm *.o
-	rm *.ko
-	rm *.mod.c
-	rm Module.symvers
-	rm modules.order
+	make -C /lib/modules/`uname -r`/build M=`pwd` clean
+
