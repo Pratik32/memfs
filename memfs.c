@@ -28,7 +28,7 @@ static int memfs_create(struct inode*,struct dentry*,umode_t,bool);
 static int memfs_open(struct inode*,struct file*);
 static struct inode* memfs_iget(struct super_block*,const struct inode*,
                                 unsigned long,umode_t);
-
+static ssize_t memfs_read(struct file*, char __user*, size_t, loff_t*);
 struct file_system_type memfs = {
     .name = "memfs",
     .mount = memfs_mount,
@@ -56,6 +56,7 @@ struct inode_operations memfs_file_inode_operations = {
 // Using generic read ops for now.
 // Will write new ones soon.
 struct file_operations memfs_file_operations = {
+    .read = memfs_read,
     .read_iter = generic_file_read_iter,
     .write_iter = generic_file_write_iter,
     .llseek = generic_file_llseek
@@ -143,16 +144,17 @@ static int filename_len = sizeof(filename)-1;
 static struct dentry* memfs_lookup(struct inode* dir,struct dentry* entry,
                                     unsigned int flags) {
     struct inode *ip;
-    printk("Inside: %s\n",__FUNCTION__);
-    if(dir->i_ino != ROOT_INODE || entry->d_name.len != filename_len) {
+    DEBUG("Inside: %s\n",__FUNCTION__);
+    DEBUG("Looking for file with name %s \n", entry->d_iname);
+    if(dir->i_ino != ROOT_INODE) {
         printk("%s:Error in memfs_lookup\n",__FUNCTION__);
-    } else {
+    }   else {
         ip = memfs_iget(dir->i_sb,dir,2,S_IFREG);
         if(!ip) {
             printk("%s:Inode allocation/read failed.\n",__FUNCTION__);
             return ERR_PTR(-ENOMEM);
         } else {
-            //ip->i_count+=1;
+            atomic_inc(&ip->i_count);
             d_add(entry,ip);
         }
     }
@@ -191,9 +193,15 @@ static int memfs_write_inode(struct inode* ip,struct writeback_control* wbc) {
     return 1;
 }
 
-static int memfs_open(struct inode* ip,struct file* file) {
+static int memfs_open(struct inode *ip,struct file *file) {
     printk("%s: opening file with inode: %lu\n",__FUNCTION__,ip->i_ino);
     return generic_file_open(ip,file);
+}
+
+static ssize_t memfs_read(struct file *file, char __user *user, size_t size,
+                          loff_t *off) {
+    DEBUG("Inside %s:\n",__FUNCTION__);
+    return 0;
 }
 
 static int init_memfs_module(void) {
@@ -206,7 +214,7 @@ static int init_memfs_module(void) {
 static void exit_memfs_module(void) {
     printk("Inside: %s\n",__FUNCTION__);
     unregister_filesystem(&memfs);
-    printk("exiting...");
+    printk("exiting... \n");
 }
 
 module_init(init_memfs_module);
