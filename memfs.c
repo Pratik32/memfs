@@ -45,7 +45,7 @@ struct super_operations memfs_super_operations = {
  * reg file inode.
  */
 struct inode_operations memfs_dir_inode_operations = {
-    .lookup = simple_lookup,
+    .lookup = memfs_lookup,
     .create = memfs_create
 };
 struct inode_operations memfs_file_inode_operations = {
@@ -150,6 +150,8 @@ static struct inode* memfs_iget(struct super_block* sb,const struct inode *dir,
  * lookup internally calls iget of  the given filesystem to get the 'inode'
  * structure and attach it to dentry object.Once we get the dentry filled,
  * we add it to the dcache.
+ * If the required inode is not found, We attach NULL to the dentry.(which tells
+ * VFS that required file does not exist.)
  * Returns the same dentry object.
  */
 static char filename[] = "hello.txt";
@@ -157,25 +159,32 @@ static int filename_len = sizeof(filename)-1;
 static struct dentry* memfs_lookup(struct inode* dir,struct dentry* entry,
                                     unsigned int flags) {
     struct inode *ip;
-    DEBUG("Inside: %s\n",__FUNCTION__);
+    DEBUG("Inside: %s\n", __FUNCTION__);
     DEBUG("Looking for file with name %s \n", entry->d_iname);
     if(dir->i_ino != ROOT_INODE) {
-        printk("%s:Error in memfs_lookup\n",__FUNCTION__);
-    }   else {
-        ip = memfs_iget(dir->i_sb,dir,2,S_IFREG);
+        printk("%s:Error in memfs_lookup\n", __FUNCTION__);
+    } else {
+        ip = iget_locked(dir->i_sb, 2);
         if(!ip) {
-            printk("%s:Inode allocation/read failed.\n",__FUNCTION__);
+            printk("%s:Inode allocation/read failed.\n", __FUNCTION__);
             return ERR_PTR(-ENOMEM);
+          /* If the inode is newly allocated,lookup has failed,
+           * hence return NULL
+           */
+        } if(ip->i_state & I_NEW) {
+            unlock_new_inode(ip);//unlock before returning.
+            DEBUG("File %s not found returning NULL inode\n", entry->d_iname);
+            d_add(entry, NULL);
         } else {
+            DEBUG("Found the required inode of file %s\n", entry->d_iname);
             atomic_inc(&ip->i_count);
-            d_add(entry,ip);
+            d_add(entry, ip);
         }
     }
     return NULL;
 }
 
-/*
- *create an inode and attach it to the dentry object.
+/*create an inode and attach it to the dentry object.
  *In our case we are just creating and 'inode' and attaching it to dentry.
  *In actual,FS must create an entry in given dir inode.
  */
