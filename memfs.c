@@ -61,6 +61,19 @@ struct file_operations memfs_file_operations = {
     .write_iter = generic_file_write_iter,
     .llseek = generic_file_llseek
 };
+
+/* Keeping dir operations seperate from reg file ops.
+ * Dir file ops needs different code handling.
+ */
+const struct file_operations memfs_dir_operations = {
+    .open = dcache_dir_open,
+    .read = generic_read_dir,
+    /* iterate_shared is getting called when we 'ls'
+     * on a directory(weird!).
+     * hence Attaching our readdir function here.
+     */
+    .iterate_shared = dcache_readdir
+};
 /*
  * called when filesystem is mounted.
  */
@@ -121,11 +134,11 @@ static struct inode* memfs_iget(struct super_block* sb,const struct inode *dir,
     if((flags & S_IFMT) == S_IFDIR) {
         printk("%s: Filling a directory file inode\n",__FUNCTION__);    
         ip->i_op = &memfs_dir_inode_operations;
-        ip->i_fop = &simple_dir_operations;
+        ip->i_fop = &memfs_dir_operations;
     }else if((flags & S_IFMT) == S_IFREG) {
         printk("%s: Filling a regular file inode\n",__FUNCTION__);
-        ip->i_op=&memfs_file_inode_operations;
-        ip->i_fop=&memfs_file_operations;
+        ip->i_op = &memfs_file_inode_operations;
+        ip->i_fop = &memfs_file_operations;
     }
     unlock_new_inode(ip);
     return ip;
