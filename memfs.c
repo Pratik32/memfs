@@ -7,6 +7,7 @@
 #include<linux/sched.h>
 #include<linux/kernel.h>
 #include "internal.h"
+#include<linux/pagemap.h>
 
 MODULE_LICENSE("GPL"); 
 #define ROOT_INODE 1
@@ -163,24 +164,12 @@ static struct dentry* memfs_lookup(struct inode* dir,struct dentry* entry,
     DEBUG("Looking for file with name %s \n", entry->d_iname);
     if(dir->i_ino != ROOT_INODE) {
         printk("%s:Error in memfs_lookup\n", __FUNCTION__);
-    } else {
-        ip = iget_locked(dir->i_sb, 2);
-        if(!ip) {
-            printk("%s:Inode allocation/read failed.\n", __FUNCTION__);
-            return ERR_PTR(-ENOMEM);
-          /* If the inode is newly allocated,lookup has failed,
-           * hence return NULL
-           */
-        } if(ip->i_state & I_NEW) {
-            unlock_new_inode(ip);//unlock before returning.
-            DEBUG("File %s not found returning NULL inode\n", entry->d_iname);
-            d_add(entry, NULL);
-        } else {
-            DEBUG("Found the required inode of file %s\n", entry->d_iname);
-            atomic_inc(&ip->i_count);
-            d_add(entry, ip);
-        }
     }
+    /*Here I have to figure out,how to find out if file exist
+     *exist or not.(maybe a list of char array?).
+     *For now just returning 'not found'.
+     */
+    d_add(entry, NULL);
     return NULL;
 }
 
@@ -192,14 +181,17 @@ static int memfs_create(struct inode *dir,struct dentry *entry,umode_t mode,
                         bool excl) {
     struct inode *ip;
     printk("Inside: %s\n",__FUNCTION__);
-    ip = memfs_iget(dir->i_sb,dir,2,mode);
+    ip = new_inode(dir->i_sb);
     if(ip) {
+        ip->i_ino = get_next_ino();
+        mapping_set_gfp_mask(ip->i_mapping, GFP_HIGHUSER);
+        inode_init_owner(ip, dir, mode);
         d_instantiate(entry,ip);
         dget(entry);
         dir->i_mtime = dir->i_ctime = current_time(dir);
     } else {
        printk("%s:Error creating inode\n",__FUNCTION__);
-       return -1;
+       return -ENOMEM;
     }
     return 0;
 }
