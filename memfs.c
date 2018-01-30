@@ -154,6 +154,8 @@ static struct inode* memfs_iget(struct super_block* sb,const struct inode *dir,
  * If the required inode is not found, We attach NULL to the dentry.(which tells
  * VFS that required file does not exist.)
  * Returns the same dentry object.
+ * Note:Calling memfs_iget from here is not proper,as it always allocates an inode,
+ * here, we have to find out if any such inode exist or not based on filename.
  */
 static char filename[] = "hello.txt";
 static int filename_len = sizeof(filename)-1;
@@ -176,6 +178,10 @@ static struct dentry* memfs_lookup(struct inode* dir,struct dentry* entry,
 /*create an inode and attach it to the dentry object.
  *In our case we are just creating and 'inode' and attaching it to dentry.
  *In actual,FS must create an entry in given dir inode.
+ *Note: new_inode(super_block*) creates a new inode, and adds it to the
+ *inode list of FS represented by given super_block.
+ *d_instantiate():adds given inode to dentry.
+ *Need to figure out the difference between d_add and d_instantiate
  */
 static int memfs_create(struct inode *dir,struct dentry *entry,umode_t mode,
                         bool excl) {
