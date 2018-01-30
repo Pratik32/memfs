@@ -181,7 +181,9 @@ static struct dentry* memfs_lookup(struct inode* dir,struct dentry* entry,
  *Note: new_inode(super_block*) creates a new inode, and adds it to the
  *inode list of FS represented by given super_block.
  *d_instantiate():adds given inode to dentry.
- *Need to figure out the difference between d_add and d_instantiate
+ *Note:d_add Vs d_instantiate
+ *d_add calls d_instantiate for initializing d_inode field and adds dentry
+ * to global hash table - dentryhashtable.
  */
 static int memfs_create(struct inode *dir,struct dentry *entry,umode_t mode,
                         bool excl) {
