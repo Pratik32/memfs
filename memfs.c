@@ -57,7 +57,8 @@ struct inode_operations memfs_file_inode_operations = {
 // Using generic read ops for now.
 // Will write new ones soon.
 struct file_operations memfs_file_operations = {
-    .read = memfs_read,
+    .open = memfs_open,
+   // .read = memfs_read,
     .read_iter = generic_file_read_iter,
     .write_iter = generic_file_write_iter,
     .llseek = generic_file_llseek
@@ -120,7 +121,6 @@ static struct inode* memfs_iget(struct super_block* sb,const struct inode *dir,
     struct inode *ip;
     DEBUG("Inside:%s i_no = %lu\n",__FUNCTION__,i_no);
     ip = iget_locked(sb,i_no);
-
     if(!ip) {
         printk("%s:Error allocating the inode\n",__FUNCTION__);
         return ERR_PTR(-ENOMEM);
@@ -133,16 +133,12 @@ static struct inode* memfs_iget(struct super_block* sb,const struct inode *dir,
     printk("Inode number assigned is: %lu",i_no);
     ip->i_atime = ip->i_mtime = ip->i_ctime = current_time(ip);
     if((flags & S_IFMT) == S_IFDIR) {
-        printk("%s: Filling a directory file inode\n",__FUNCTION__);    
-        ip->i_op = &memfs_dir_inode_operations;
+        DEBUG("Filling a directory inode %lu\n", ip->i_ino);
         ip->i_fop = &memfs_dir_operations;
-    }else if((flags & S_IFMT) == S_IFREG) {
-        printk("%s: Filling a regular file inode\n",__FUNCTION__);
-        ip->i_op = &memfs_file_inode_operations;
-        ip->i_fop = &memfs_file_operations;
+        ip->i_op = &memfs_dir_inode_operations;
     }
     unlock_new_inode(ip);
-    return ip;
+    return ip; 
 }
 
 /* memfs_lookup:inode lookup function
@@ -193,7 +189,10 @@ static int memfs_create(struct inode *dir,struct dentry *entry,umode_t mode,
     if(ip) {
         ip->i_ino = get_next_ino();
         mapping_set_gfp_mask(ip->i_mapping, GFP_HIGHUSER);
-        inode_init_owner(ip, dir, mode);
+        inode_init_owner(ip, dir, mode | S_IFREG);
+        DEBUG("%s: Filling a regular file inode %lu \n",__FUNCTION__, ip->i_ino);
+        ip->i_op = &memfs_file_inode_operations;
+        ip->i_fop = &memfs_file_operations;
         d_instantiate(entry,ip);
         dget(entry);
         dir->i_mtime = dir->i_ctime = current_time(dir);
@@ -203,8 +202,8 @@ static int memfs_create(struct inode *dir,struct dentry *entry,umode_t mode,
     }
     return 0;
 }
-/* Called during unmounting of FS.
- *
+/* 
+ * Called during unmounting of  FS.
  */
 static void memfs_kill_sb(struct super_block* sb) {
     printk("Inside: %s\n",__FUNCTION__);
@@ -215,9 +214,17 @@ static int memfs_write_inode(struct inode* ip,struct writeback_control* wbc) {
     return 1;
 }
 
+/*
+ *Called when a file is about to open.
+ *We are not supporting largefiles, hence will return overflow message.
+ */
 static int memfs_open(struct inode *ip,struct file *file) {
     printk("%s: opening file with inode: %lu\n",__FUNCTION__,ip->i_ino);
-    return generic_file_open(ip,file);
+    if(!(file->f_flags & O_LARGEFILE)) {
+        DEBUG("Memory overflow! Large file.%lu\n", ip->i_ino);
+        return -EOVERFLOW;
+    }
+    return 0;
 }
 
 static ssize_t memfs_read(struct file *file, char __user *user, size_t size,
