@@ -10,7 +10,7 @@
 #include<linux/pagemap.h>
 
 MODULE_LICENSE("GPL"); 
-#define ROOT_INODE 1
+unsigned long root_ino;
 #define MEMFS_MAGIC 0xabcd
 #define  MEMFS_DEFAULT_FILEMODE  0755
 
@@ -30,6 +30,7 @@ static int memfs_open(struct inode*,struct file*);
 static struct inode* memfs_iget(struct super_block*,const struct inode*,
                                 unsigned long,umode_t);
 static ssize_t memfs_read(struct file*, char __user*, size_t, loff_t*);
+static int memfs_readdir(struct file*, struct dir_context*);
 struct file_system_type memfs = {
     .name = "memfs",
     .mount = memfs_mount,
@@ -74,7 +75,7 @@ const struct file_operations memfs_dir_operations = {
      * on a directory(weird!).
      * hence Attaching our readdir function here.
      */
-    .iterate_shared = dcache_readdir
+    .iterate_shared = memfs_readdir
 };
 /*
  * called when filesystem is mounted.
@@ -91,14 +92,18 @@ static struct dentry* memfs_mount(struct file_system_type* fs,int flags,
  *  data: mount options passed to superblock filler function.
  */
 static int memfs_fill_super(struct super_block* sb,void* data,int flags) {
+    unsigned long i_ino;
     printk("Inside memfs_fill_super\n");
     sb->s_blocksize = PAGE_SIZE;
     sb->s_blocksize_bits = PAGE_SHIFT;
     sb->s_type = &memfs;
     sb->s_magic = MEMFS_MAGIC;
     sb->s_op = &memfs_super_operations;
-    memfs_root_inode = memfs_iget(sb,NULL,1,S_IFDIR|MEMFS_DEFAULT_FILEMODE);
-
+    i_ino = get_next_ino();
+    root_ino = i_ino;
+    DEBUG("Inode number assigned to root: %lu \n", i_ino);
+    memfs_root_inode = memfs_iget(sb, NULL, i_ino,
+                            S_IFDIR|MEMFS_DEFAULT_FILEMODE);
     if(!(sb->s_root = d_make_root(memfs_root_inode))) {
         iput(memfs_root_inode);
         printk("%sfailed to allocate dentry\n",__FUNCTION__);
@@ -119,13 +124,13 @@ static int memfs_fill_super(struct super_block* sb,void* data,int flags) {
 static struct inode* memfs_iget(struct super_block* sb,const struct inode *dir,
                                         unsigned long i_no,umode_t flags) {
     struct inode *ip;
-    DEBUG("Inside:%s i_no = %lu\n",__FUNCTION__,i_no);
+    DEBUG("Inside:%s i_no = %lu\n", __FUNCTION__, i_no);
     ip = iget_locked(sb,i_no);
     if(!ip) {
-        printk("%s:Error allocating the inode\n",__FUNCTION__);
+        printk("%s:Error allocating the inode\n", __FUNCTION__);
         return ERR_PTR(-ENOMEM);
     } else if(!(ip->i_state & I_NEW)) {
-        printk("%s:Returning an existing inode\n",__FUNCTION__);
+        printk("%s:Returning an existing inode\n", __FUNCTION__);
         return ip;
     }
     inode_init_owner(ip,dir,flags);
@@ -160,7 +165,7 @@ static struct dentry* memfs_lookup(struct inode* dir,struct dentry* entry,
     struct inode *ip;
     DEBUG("Inside: %s\n", __FUNCTION__);
     DEBUG("Looking for file with name %s \n", entry->d_iname);
-    if(dir->i_ino != ROOT_INODE) {
+    if(dir->i_ino != root_ino) {
         printk("%s:Error in memfs_lookup\n", __FUNCTION__);
     }
     /*Here I have to figure out,how to find out if file exist
@@ -211,7 +216,7 @@ static void memfs_kill_sb(struct super_block* sb) {
 
 static int memfs_write_inode(struct inode* ip,struct writeback_control* wbc) {
     printk("Inside: %s\n",__FUNCTION__);
-    return 1;
+    return 0;
 }
 
 /*
@@ -219,7 +224,9 @@ static int memfs_write_inode(struct inode* ip,struct writeback_control* wbc) {
  *We are not supporting largefiles, hence will return overflow message.
  */
 static int memfs_open(struct inode *ip,struct file *file) {
-    printk("%s: opening file with inode: %lu\n",__FUNCTION__,ip->i_ino);
+    DEBUG("Name of the file is : %s \n", file->f_path.dentry->d_iname);
+    DEBUG("Inode number of its parent is %lu \n", parent_ino(file->f_path.dentry));
+    DEBUG("%s: opening file with inode: %lu\n", __FUNCTION__, ip->i_ino);
     if(!(file->f_flags & O_LARGEFILE)) {
         DEBUG("Memory overflow! Large file.%lu\n", ip->i_ino);
         return -EOVERFLOW;
@@ -233,6 +240,12 @@ static ssize_t memfs_read(struct file *file, char __user *user, size_t size,
     return 0;
 }
 
+static int memfs_readdir(struct file *file, struct dir_context *ctx) {
+    DEBUG("Inside %s \n", __FUNCTION__);
+    DEBUG("Reading %s directory \n", file->f_path.dentry->d_iname);
+    return dcache_readdir(file, ctx);
+}
+
 static int init_memfs_module(void) {
     int err;
     DEBUG("Inside: %s registering filesystem\n",__FUNCTION__);
@@ -240,6 +253,7 @@ static int init_memfs_module(void) {
     printk("memfs: err: %d\n",err);
     return err;
 }
+
 static void exit_memfs_module(void) {
     printk("Inside: %s\n",__FUNCTION__);
     unregister_filesystem(&memfs);
