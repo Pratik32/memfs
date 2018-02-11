@@ -39,7 +39,7 @@ struct file_system_type memfs = {
     .fs_flags = FS_USERNS_MOUNT
 };
 struct super_operations memfs_super_operations = {
-    .write_inode=memfs_write_inode
+    .write_inode = memfs_write_inode,
 };
 
 /* Seperating the dir and reg file inode functions.
@@ -239,11 +239,50 @@ static ssize_t memfs_read(struct file *file, char __user *user, size_t size,
     DEBUG("Inside %s:\n",__FUNCTION__);
     return 0;
 }
-
+/*
+ * readdir function for memfs.
+ * file : directory file that need to be read.
+ * dir_context: this struct consist of a position that represents
+ * file descriptor offset & it contains filldir func,which a kern
+ * function for filling up dentries and copy_to_user.
+ * 
+ * Inshort, this function is called by kernel when it wants to read/'ls'
+ * a dir.On successfully reading an entry, ctx->pos must be increamented
+ * by 1.
+ */
 static int memfs_readdir(struct file *file, struct dir_context *ctx) {
-    DEBUG("Inside %s \n", __FUNCTION__);
-    DEBUG("Reading %s directory \n", file->f_path.dentry->d_iname);
-    return dcache_readdir(file, ctx);
+    struct dentry *curr;
+    struct dentry *thedentry = file->f_path.dentry;
+    loff_t pos = ctx->pos;
+    struct list_head *p = &thedentry->d_subdirs, *q;
+    DEBUG("position is %lld \n", ctx->pos);
+    DEBUG("Reading %s directory \n", file->f_path.dentry->d_name.name);
+    list_for_each_entry(curr, &thedentry->d_subdirs, d_child) {
+        DEBUG("Name: %s \n", curr->d_name.name);
+    }
+
+    /*
+     * This if cond is hacky, we return if we already provided 
+     * all the dentries.(i.e pos != 0).
+     * */
+    if(pos) {
+        DEBUG("All data filled in pos %lld \n", pos);
+        return 0;
+    }
+    if(!dir_emit_dots(file, ctx)) {
+        DEBUG("Error in dir_emit_dots\n");
+        return 0;
+    }
+    for(q = p->next; q != &thedentry->d_subdirs; q = q->next) {
+        curr = list_entry(q, struct dentry, d_child);
+        if(!dir_emit(ctx, curr->d_name.name, curr->d_name.len,
+                    curr->d_inode->i_ino, DT_UNKNOWN)) {
+            DEBUG("Error in dir_emit()\n");
+            break;
+        }
+        ctx->pos++;
+    }
+    return 0;
 }
 
 static int init_memfs_module(void) {
