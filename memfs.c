@@ -32,10 +32,10 @@ static struct inode* memfs_iget(struct super_block*,const struct inode*,
 static ssize_t memfs_read(struct file*, char __user*, size_t, loff_t*);
 static int memfs_readdir(struct file*, struct dir_context*);
 struct file_system_type memfs = {
-    .name = "memfs",
-    .mount = memfs_mount,
-    .kill_sb = memfs_kill_sb,
-    .owner = THIS_MODULE,
+    .name     = "memfs",
+    .mount    = memfs_mount,
+    .kill_sb  = memfs_kill_sb,
+    .owner    = THIS_MODULE,
     .fs_flags = FS_USERNS_MOUNT
 };
 struct super_operations memfs_super_operations = {
@@ -58,11 +58,11 @@ struct inode_operations memfs_file_inode_operations = {
 // Using generic read ops for now.
 // Will write new ones soon.
 struct file_operations memfs_file_operations = {
-    .open = memfs_open,
+    .open       = memfs_open,
    // .read = memfs_read,
-    .read_iter = generic_file_read_iter,
+    .read_iter  = generic_file_read_iter,
     .write_iter = generic_file_write_iter,
-    .llseek = generic_file_llseek
+    .llseek     = generic_file_llseek
 };
 
 /* Keeping dir operations seperate from reg file ops.
@@ -94,16 +94,17 @@ static struct dentry* memfs_mount(struct file_system_type* fs,int flags,
 static int memfs_fill_super(struct super_block* sb,void* data,int flags) {
     unsigned long i_ino;
     printk("Inside memfs_fill_super\n");
-    sb->s_blocksize = PAGE_SIZE;
+    sb->s_blocksize      = PAGE_SIZE;
     sb->s_blocksize_bits = PAGE_SHIFT;
-    sb->s_type = &memfs;
-    sb->s_magic = MEMFS_MAGIC;
-    sb->s_op = &memfs_super_operations;
-    i_ino = get_next_ino();
-    root_ino = i_ino;
+    sb->s_type           = &memfs;
+    sb->s_magic          = MEMFS_MAGIC;
+    sb->s_op             = &memfs_super_operations;
+    i_ino                = get_next_ino();
+    root_ino             = i_ino;
     DEBUG("Inode number assigned to root: %lu \n", i_ino);
-    memfs_root_inode = memfs_iget(sb, NULL, i_ino,
+    memfs_root_inode     = memfs_iget(sb, NULL, i_ino,
                             S_IFDIR|MEMFS_DEFAULT_FILEMODE);
+
     if(!(sb->s_root = d_make_root(memfs_root_inode))) {
         iput(memfs_root_inode);
         printk("%sfailed to allocate dentry\n",__FUNCTION__);
