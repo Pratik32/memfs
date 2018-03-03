@@ -6,8 +6,11 @@
 #include<linux/statfs.h>
 #include<linux/sched.h>
 #include<linux/kernel.h>
-#include "internal.h"
+#include<linux/writeback.h>
 #include<linux/pagemap.h>
+#include<linux/pagemap.h>
+
+#include "internal.h"
 
 MODULE_LICENSE("GPL"); 
 unsigned long root_ino;
@@ -31,6 +34,10 @@ static struct inode* memfs_iget(struct super_block*,const struct inode*,
                                 unsigned long,umode_t);
 static ssize_t memfs_read(struct file*, char __user*, size_t, loff_t*);
 static int memfs_readdir(struct file*, struct dir_context*);
+// address space operations
+static int memfs_readpage(struct file*, struct page*);
+static int memfs_writepage(struct page*, struct writeback_control*);
+
 struct file_system_type memfs = {
     .name     = "memfs",
     .mount    = memfs_mount,
@@ -55,6 +62,10 @@ struct inode_operations memfs_file_inode_operations = {
     .getattr = simple_getattr
 };
 
+struct address_space_operations memfs_aops = {
+    .readpage  = memfs_readpage,
+    .writepage = memfs_writepage
+};
 // Using generic read ops for now.
 // Will write new ones soon.
 struct file_operations memfs_file_operations = {
@@ -199,6 +210,7 @@ static int memfs_create(struct inode *dir,struct dentry *entry,umode_t mode,
         DEBUG("%s: Filling a regular file inode %lu \n",__FUNCTION__, ip->i_ino);
         ip->i_op = &memfs_file_inode_operations;
         ip->i_fop = &memfs_file_operations;
+        ip->i_mapping->a_ops = &memfs_aops;
         d_instantiate(entry,ip);
         dget(entry);
         dir->i_mtime = dir->i_ctime = current_time(dir);
@@ -283,6 +295,39 @@ static int memfs_readdir(struct file *file, struct dir_context *ctx) {
         }
         ctx->pos++;
     }
+    return 0;
+}
+/* 
+ * readpage handle for FS.
+ * through readpage handler kernel expects FS to query blk device
+ * and read file data in specified page.
+ * As we are keeping data in memory, we are doing following things:
+ *     1.Check PG_Uptodate flags, if it is unset,
+ *       we are here for this page for the first time.Hence we zero 
+ *       out the page and set it as uptodate.If page is upto date
+ *       we do nothing and just return.
+ *     2.As we are keeping data in memory we have to make sure page
+ *       is not flushed by flusher threads.
+ * kmap() function takes struct page and returns its logical address.
+ * internally it calls page_address().Remember all the address are 
+ * logical.
+ * */
+static int memfs_readpage(struct file *file , struct page *page) {
+    void *addr = NULL;
+    DEBUG("Inside %s inode: %lu \n", __FUNCTION__, file->f_inode->i_ino);
+    if(!PageUptodate(page)) {
+        DEBUG("Page is not upto date\n");
+        addr = kmap(page);
+        memset(addr, 0, PAGE_SIZE);
+        kunmap(page);
+        SetPageUptodate(page);
+    }
+    unlock_page(page);
+    return 0;
+}
+
+static int memfs_writepage(struct page *page, struct writeback_control *wbc) {
+    DEBUG("Inside %s \n", __FUNCTION__);
     return 0;
 }
 
