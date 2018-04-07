@@ -8,7 +8,7 @@
 #include<linux/kernel.h>
 #include<linux/writeback.h>
 #include<linux/pagemap.h>
-#include<linux/pagemap.h>
+#include<linux/uio.h>
 
 #include "internal.h"
 
@@ -33,10 +33,15 @@ static int memfs_open(struct inode*,struct file*);
 static struct inode* memfs_iget(struct super_block*,const struct inode*,
                                 unsigned long,umode_t);
 static ssize_t memfs_read(struct file*, char __user*, size_t, loff_t*);
+static ssize_t memfs_write_iter(struct kiocb*, struct iov_iter*);
 static int memfs_readdir(struct file*, struct dir_context*);
 // address space operations
 static int memfs_readpage(struct file*, struct page*);
 static int memfs_writepage(struct page*, struct writeback_control*);
+static int memfs_write_begin(struct file*, struct address_space*, loff_t, unsigned,
+                        unsigned, struct page**, void**);
+static int memfs_write_end(struct file*, struct address_space*, loff_t , unsigned,
+                            unsigned, struct page*, void*);
 
 struct file_system_type memfs = {
     .name     = "memfs",
@@ -63,8 +68,10 @@ struct inode_operations memfs_file_inode_operations = {
 };
 
 struct address_space_operations memfs_aops = {
-    .readpage  = memfs_readpage,
-    .writepage = memfs_writepage
+    .readpage    = memfs_readpage,
+    .writepage   = memfs_writepage,
+    .write_begin = memfs_write_begin,
+    .write_end   = memfs_write_end
 };
 // Using generic read ops for now.
 // Will write new ones soon.
@@ -72,7 +79,7 @@ struct file_operations memfs_file_operations = {
     .open       = memfs_open,
    // .read = memfs_read,
     .read_iter  = generic_file_read_iter,
-    .write_iter = generic_file_write_iter,
+    .write_iter = memfs_write_iter,
     .llseek     = generic_file_llseek
 };
 
@@ -170,8 +177,6 @@ static struct inode* memfs_iget(struct super_block* sb,const struct inode *dir,
  * Note:Calling memfs_iget from here is not proper,as it always allocates an inode,
  * here, we have to find out if any such inode exist or not based on filename.
  */
-static char filename[] = "hello.txt";
-static int filename_len = sizeof(filename)-1;
 static struct dentry* memfs_lookup(struct inode* dir,struct dentry* entry,
                                     unsigned int flags) {
     struct inode *ip;
@@ -203,6 +208,7 @@ static int memfs_create(struct inode *dir,struct dentry *entry,umode_t mode,
     struct inode *ip;
     printk("Inside: %s\n",__FUNCTION__);
     ip = new_inode(dir->i_sb);
+    DEBUG("mode is %o \n", mode);
     if(ip) {
         ip->i_ino = get_next_ino();
         mapping_set_gfp_mask(ip->i_mapping, GFP_HIGHUSER);
@@ -297,6 +303,7 @@ static int memfs_readdir(struct file *file, struct dir_context *ctx) {
     }
     return 0;
 }
+
 /* 
  * readpage handle for FS.
  * through readpage handler kernel expects FS to query blk device
@@ -329,6 +336,47 @@ static int memfs_readpage(struct file *file , struct page *page) {
 static int memfs_writepage(struct page *page, struct writeback_control *wbc) {
     DEBUG("Inside %s \n", __FUNCTION__);
     return 0;
+}
+
+static int memfs_write_begin(struct file *file, struct address_space *mapping,
+                        loff_t pos, unsigned len, unsigned flags,
+                        struct page **pagep, void **fsdata) {
+    int index;
+    DEBUG("inside %s\n",  __FUNCTION__);
+    DEBUG("pos = %lu len = %lu \n", pos, len);
+    index = pos >> PAGE_SHIFT;
+    *pagep = grab_cache_page_write_begin(mapping, index, flags);
+    if(*pagep) {
+        return -ENOMEM;
+    }
+    return 0;
+}
+
+static int memfs_write_end(struct file *file, struct address_space *mapping,
+                        loff_t pos, unsigned len, unsigned copied,
+                        struct page *page, void *fsdata) {
+
+    struct inode ip = page->mapping->host;
+    DEBUG("Inside %s", __FUNCTION__);
+    DEBUG("inode = %lu pos = %d len = %d copied = %d \n", ip->i_ino,
+            pos, len, copied);
+    if(!PageUptodate(page)) {
+        DEBUG("Page was not upto date\n");
+        setPageUptodate(page);
+    }
+    if(ip->i_size < (pos + len)) {
+        i_size_write(pos + len);
+    }
+    set_page_dirty(page);
+    unlock_page(page);
+    put_page(page);
+    return 0;
+}
+
+static ssize_t memfs_write_iter(struct kiocb *kiocb, struct iov_iter *i) {
+    DEBUG("Inside %s \n", __FUNCTION__);
+    DEBUG("Number of vectors %lu \n", i->count);
+    return generic_file_write_iter(kiocb, i);
 }
 
 static int init_memfs_module(void) {
