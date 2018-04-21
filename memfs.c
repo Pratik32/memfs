@@ -42,7 +42,7 @@ static int memfs_write_begin(struct file*, struct address_space*, loff_t, unsign
                         unsigned, struct page**, void**);
 static int memfs_write_end(struct file*, struct address_space*, loff_t , unsigned,
                             unsigned, struct page*, void*);
-
+static int memfs_set_page_dirty(struct page*);
 struct file_system_type memfs = {
     .name     = "memfs",
     .mount    = memfs_mount,
@@ -68,10 +68,11 @@ struct inode_operations memfs_file_inode_operations = {
 };
 
 struct address_space_operations memfs_aops = {
-    .readpage    = memfs_readpage,
-    .writepage   = memfs_writepage,
+    .readpage    = simple_readpage,
+    //.writepage   = memfs_writepage,
     .write_begin = memfs_write_begin,
-    .write_end   = memfs_write_end
+    .write_end   = memfs_write_end,
+    .set_page_dirty = memfs_set_page_dirty
 };
 // Using generic read ops for now.
 // Will write new ones soon.
@@ -79,8 +80,9 @@ struct file_operations memfs_file_operations = {
     .open       = memfs_open,
    // .read = memfs_read,
     .read_iter  = generic_file_read_iter,
-    .write_iter = memfs_write_iter,
-    .llseek     = generic_file_llseek
+    .write_iter = generic_file_write_iter,
+    .llseek     = generic_file_llseek,
+    .fsync      = noop_fsync
 };
 
 /* Keeping dir operations seperate from reg file ops.
@@ -93,7 +95,8 @@ const struct file_operations memfs_dir_operations = {
      * on a directory(weird!).
      * hence Attaching our readdir function here.
      */
-    .iterate_shared = memfs_readdir
+    //.iterate_shared = memfs_readdir
+    .iterate_shared  = memfs_readdir
 };
 /*
  * called when filesystem is mounted.
@@ -184,6 +187,10 @@ static struct dentry* memfs_lookup(struct inode* dir,struct dentry* entry,
     DEBUG("Looking for file with name %s \n", entry->d_iname);
     if(dir->i_ino != root_ino) {
         printk("%s:Error in memfs_lookup\n", __FUNCTION__);
+    }
+    if(!entry->d_sb->s_d_op) {
+        DEBUG("%s not a valid entry: %s", entry->d_name.name);
+        d_set_d_op(entry, &simple_dentry_operations);
     }
     /*Here I have to figure out,how to find out if file exist
      *exist or not.(maybe a list of char array?).
@@ -276,9 +283,9 @@ static int memfs_readdir(struct file *file, struct dir_context *ctx) {
     struct list_head *p = &thedentry->d_subdirs, *q;
     DEBUG("position is %lld \n", ctx->pos);
     DEBUG("Reading %s directory \n", file->f_path.dentry->d_name.name);
-    list_for_each_entry(curr, &thedentry->d_subdirs, d_child) {
+   /* list_for_each_entry(curr, &thedentry->d_subdirs, d_child) {
         DEBUG("Name: %s \n", curr->d_name.name);
-    }
+    }*/
 
     /*
      * This if cond is hacky, we return if we already provided 
@@ -292,12 +299,22 @@ static int memfs_readdir(struct file *file, struct dir_context *ctx) {
         DEBUG("Error in dir_emit_dots\n");
         return 0;
     }
+    if(p == NULL && p->next == NULL) {
+        DEBUG("%s: nothing to read returning", __FUNCTION__);
+        return 0;
+    }
     for(q = p->next; q != &thedentry->d_subdirs; q = q->next) {
         curr = list_entry(q, struct dentry, d_child);
+        if(curr == NULL) {
+            break;
+        }
         if(!dir_emit(ctx, curr->d_name.name, curr->d_name.len,
                     curr->d_inode->i_ino, DT_UNKNOWN)) {
             DEBUG("Error in dir_emit()\n");
             break;
+        }
+        if(q == NULL ) {
+            DEBUG("%s: returning", __FUNCTION__);
         }
         ctx->pos++;
     }
@@ -341,13 +358,17 @@ static int memfs_writepage(struct page *page, struct writeback_control *wbc) {
 static int memfs_write_begin(struct file *file, struct address_space *mapping,
                         loff_t pos, unsigned len, unsigned flags,
                         struct page **pagep, void **fsdata) {
-    int index;
+    pgoff_t index;
     DEBUG("inside %s\n",  __FUNCTION__);
-    DEBUG("pos = %lu len = %lu \n", pos, len);
+    DEBUG("pos = %llu len = %u \n", pos, len);
     index = pos >> PAGE_SHIFT;
     *pagep = grab_cache_page_write_begin(mapping, index, flags);
     if(*pagep) {
         return -ENOMEM;
+    }
+    if (!PageUptodate(*pagep) && len != PAGE_SIZE) {
+        unsigned from = (PAGE_SIZE - 1) & pos;
+        zero_user_segments(*pagep, 0, from, from+len, PAGE_SIZE);
     }
     return 0;
 }
@@ -356,20 +377,27 @@ static int memfs_write_end(struct file *file, struct address_space *mapping,
                         loff_t pos, unsigned len, unsigned copied,
                         struct page *page, void *fsdata) {
 
-    struct inode ip = page->mapping->host;
+    struct inode *ip = page->mapping->host;
     DEBUG("Inside %s", __FUNCTION__);
-    DEBUG("inode = %lu pos = %d len = %d copied = %d \n", ip->i_ino,
+    DEBUG("inode = %lu pos = %llu len = %u copied = %u \n", ip->i_ino,
             pos, len, copied);
     if(!PageUptodate(page)) {
         DEBUG("Page was not upto date\n");
-        setPageUptodate(page);
+        SetPageUptodate(page);
     }
     if(ip->i_size < (pos + len)) {
-        i_size_write(pos + len);
+        i_size_write(ip, pos + len);
     }
     set_page_dirty(page);
     unlock_page(page);
     put_page(page);
+    return copied;
+}
+
+static int memfs_set_page_dirty(struct page* page) {
+    if (!PageDirty(page)) {
+        return !TestSetPageDirty(page);
+    }
     return 0;
 }
 
