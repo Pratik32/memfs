@@ -6,6 +6,9 @@
 
 obj-m += memfs.o
 ccflags-y := -I$(src)/.
+ifeq (${DBG},yes)
+ccflags-y += -DDBG=${DBG}
+endif
 all:
 	make -C /lib/modules/`uname -r`/build M=`pwd` modules
 clean:

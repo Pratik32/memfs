@@ -6,5 +6,8 @@
  * echo "7" > /proc/kernel/printk << this contains all printk
  * levels "7" will enable all of them.
  */
-
+#ifdef DBG
 #define DEBUG(str, args...) printk(str, ##args)
+#else
+#define DEBUG(str, args...)
+#endif

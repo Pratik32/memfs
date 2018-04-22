@@ -101,7 +101,7 @@ const struct file_operations memfs_dir_operations = {
  */
 static struct dentry* memfs_mount(struct file_system_type* fs,int flags,
                                    const char* devname,void* data) {
-    printk("Inside: %s\n",__FUNCTION__);
+    DEBUG("Inside: %s\n",__FUNCTION__);
     // Here we are passing superblock filler function.
     return mount_nodev(fs,flags,data,&memfs_fill_super);
 }
@@ -112,7 +112,7 @@ static struct dentry* memfs_mount(struct file_system_type* fs,int flags,
  */
 static int memfs_fill_super(struct super_block* sb,void* data,int flags) {
     unsigned long i_ino;
-    printk("Inside memfs_fill_super\n");
+    DEBUG("Inside memfs_fill_super\n");
     sb->s_blocksize      = PAGE_SIZE;
     sb->s_blocksize_bits = PAGE_SHIFT;
     sb->s_type           = &memfs;
@@ -126,7 +126,7 @@ static int memfs_fill_super(struct super_block* sb,void* data,int flags) {
 
     if(!(sb->s_root = d_make_root(memfs_root_inode))) {
         iput(memfs_root_inode);
-        printk("%sfailed to allocate dentry\n",__FUNCTION__);
+        DEBUG("%sfailed to allocate dentry\n",__FUNCTION__);
         return -ENOMEM;
     }
     return 0;
@@ -147,15 +147,15 @@ static struct inode* memfs_iget(struct super_block* sb,const struct inode *dir,
     DEBUG("Inside:%s i_no = %lu\n", __FUNCTION__, i_no);
     ip = iget_locked(sb,i_no);
     if(!ip) {
-        printk("%s:Error allocating the inode\n", __FUNCTION__);
+        DEBUG("%s:Error allocating the inode\n", __FUNCTION__);
         return ERR_PTR(-ENOMEM);
     } else if(!(ip->i_state & I_NEW)) {
-        printk("%s:Returning an existing inode\n", __FUNCTION__);
+        DEBUG("%s:Returning an existing inode\n", __FUNCTION__);
         return ip;
     }
     inode_init_owner(ip,dir,flags);
-    printk("iget_locked excuted successfully.\n");
-    printk("Inode number assigned is: %lu",i_no);
+    DEBUG("iget_locked excuted successfully.\n");
+    DEBUG("Inode number assigned is: %lu",i_no);
     ip->i_atime = ip->i_mtime = ip->i_ctime = current_time(ip);
     if((flags & S_IFMT) == S_IFDIR) {
         DEBUG("Filling a directory inode %lu\n", ip->i_ino);
@@ -184,10 +184,10 @@ static struct dentry* memfs_lookup(struct inode* dir,struct dentry* entry,
     DEBUG("Inside: %s\n", __FUNCTION__);
     DEBUG("Looking for file with name %s \n", entry->d_iname);
     if(dir->i_ino != root_ino) {
-        printk("%s:Error in memfs_lookup\n", __FUNCTION__);
+        DEBUG("%s:Error in memfs_lookup\n", __FUNCTION__);
     }
     if(!entry->d_sb->s_d_op) {
-        DEBUG("%s not a valid entry: %s", entry->d_name.name);
+        DEBUG("%s not a valid entry: %s", __FUNCTION__, entry->d_name.name);
         d_set_d_op(entry, &simple_dentry_operations);
     }
     /*Here I have to figure out,how to find out if file exist
@@ -211,7 +211,7 @@ static struct dentry* memfs_lookup(struct inode* dir,struct dentry* entry,
 static int memfs_create(struct inode *dir,struct dentry *entry,umode_t mode,
                         bool excl) {
     struct inode *ip;
-    printk("Inside: %s\n",__FUNCTION__);
+    DEBUG("Inside: %s\n",__FUNCTION__);
     ip = new_inode(dir->i_sb);
     DEBUG("mode is %o \n", mode);
     if(ip) {
@@ -226,7 +226,7 @@ static int memfs_create(struct inode *dir,struct dentry *entry,umode_t mode,
         dget(entry);
         dir->i_mtime = dir->i_ctime = current_time(dir);
     } else {
-       printk("%s:Error creating inode\n",__FUNCTION__);
+       DEBUG("%s:Error creating inode\n",__FUNCTION__);
        return -ENOMEM;
     }
     return 0;
@@ -235,11 +235,11 @@ static int memfs_create(struct inode *dir,struct dentry *entry,umode_t mode,
  * Called during unmounting of  FS.
  */
 static void memfs_kill_sb(struct super_block* sb) {
-    printk("Inside: %s\n",__FUNCTION__);
+    DEBUG("Inside: %s\n",__FUNCTION__);
 }
 
 static int memfs_write_inode(struct inode* ip,struct writeback_control* wbc) {
-    printk("Inside: %s\n",__FUNCTION__);
+    DEBUG("Inside: %s\n",__FUNCTION__);
     return 0;
 }
 
@@ -347,6 +347,16 @@ static int memfs_writepage(struct page *page, struct writeback_control *wbc) {
     return 0;
 }
 
+/* first driver call in write codepath.
+ * write codepath is somewhat like this:
+ * vfs_write() -> generic_perform_write() -> write_begin -> copy_from_user_xxx()
+ * -> write_end()
+ * in write_begin: We bring/alloc page to write to pagecache.
+ *                 lock the page and return.
+ *
+ * in write_end: We get number of bytes copied in copy_from_user_xxx we set page
+ *               uptodate and unlock it.
+ */
 static int memfs_write_begin(struct file *file, struct address_space *mapping,
                         loff_t pos, unsigned len, unsigned flags,
                         struct page **pagep, void **fsdata) {
@@ -369,6 +379,9 @@ static int memfs_write_begin(struct file *file, struct address_space *mapping,
     return 0;
 }
 
+/* write_end in write code path.
+ * see write_begin comment section.
+ */
 static int memfs_write_end(struct file *file, struct address_space *mapping,
                         loff_t pos, unsigned len, unsigned copied,
                         struct page *page, void *fsdata) {
@@ -407,14 +420,14 @@ static int init_memfs_module(void) {
     int err;
     DEBUG("Inside: %s registering filesystem\n",__FUNCTION__);
     err = register_filesystem(&memfs);
-    printk("memfs: err: %d\n",err);
+    DEBUG("memfs: err: %d\n",err);
     return err;
 }
 
 static void exit_memfs_module(void) {
-    printk("Inside: %s\n",__FUNCTION__);
+    DEBUG("Inside: %s\n",__FUNCTION__);
     unregister_filesystem(&memfs);
-    printk("exiting... \n");
+    DEBUG("exiting... \n");
 }
 
 module_init(init_memfs_module);
