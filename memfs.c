@@ -69,7 +69,6 @@ struct inode_operations memfs_file_inode_operations = {
 
 struct address_space_operations memfs_aops = {
     .readpage    = simple_readpage,
-    //.writepage   = memfs_writepage,
     .write_begin = memfs_write_begin,
     .write_end   = memfs_write_end,
     .set_page_dirty = memfs_set_page_dirty
@@ -78,7 +77,6 @@ struct address_space_operations memfs_aops = {
 // Will write new ones soon.
 struct file_operations memfs_file_operations = {
     .open       = memfs_open,
-   // .read = memfs_read,
     .read_iter  = generic_file_read_iter,
     .write_iter = generic_file_write_iter,
     .llseek     = generic_file_llseek,
@@ -299,21 +297,15 @@ static int memfs_readdir(struct file *file, struct dir_context *ctx) {
         DEBUG("Error in dir_emit_dots\n");
         return 0;
     }
-    if(p == NULL && p->next == NULL) {
-        DEBUG("%s: nothing to read returning", __FUNCTION__);
-        return 0;
-    }
     for(q = p->next; q != &thedentry->d_subdirs; q = q->next) {
         curr = list_entry(q, struct dentry, d_child);
-        if(curr == NULL) {
-            break;
-        }
         if(!dir_emit(ctx, curr->d_name.name, curr->d_name.len,
                     curr->d_inode->i_ino, DT_UNKNOWN)) {
             DEBUG("Error in dir_emit()\n");
             break;
         }
-        if(q == NULL ) {
+        if (q == NULL ) {
+            break;
             DEBUG("%s: returning", __FUNCTION__);
         }
         ctx->pos++;
@@ -359,16 +351,20 @@ static int memfs_write_begin(struct file *file, struct address_space *mapping,
                         loff_t pos, unsigned len, unsigned flags,
                         struct page **pagep, void **fsdata) {
     pgoff_t index;
+    struct page *page;
     DEBUG("inside %s\n",  __FUNCTION__);
     DEBUG("pos = %llu len = %u \n", pos, len);
     index = pos >> PAGE_SHIFT;
-    *pagep = grab_cache_page_write_begin(mapping, index, flags);
-    if(*pagep) {
+    page = grab_cache_page_write_begin(mapping, index, flags);
+    if(!page) {
+        DEBUG("%s no memory for page", __FUNCTION__);
         return -ENOMEM;
     }
-    if (!PageUptodate(*pagep) && len != PAGE_SIZE) {
+    *pagep = page;
+
+    if (!PageUptodate(page) && len != PAGE_SIZE) {
         unsigned from = (PAGE_SIZE - 1) & pos;
-        zero_user_segments(*pagep, 0, from, from+len, PAGE_SIZE);
+        zero_user_segments(page, 0, from, from+len, PAGE_SIZE);
     }
     return 0;
 }
