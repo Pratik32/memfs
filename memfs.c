@@ -14,8 +14,9 @@
 
 MODULE_LICENSE("GPL"); 
 unsigned long root_ino;
-#define MEMFS_MAGIC 0xabcd
-#define  MEMFS_DEFAULT_FILEMODE  0755
+#define	MEMFS_MAGIC 0xabcd
+#define MEMFS_DEFAULT_FILEMODE  0755
+#define MEMFS	__this_module.name
 
 static struct inode* memfs_root_inode;
 // Functions called during mount/umount.
@@ -28,12 +29,12 @@ static int memfs_write_inode(struct inode*, struct writeback_control*);
 //inode operations.
 static struct dentry* memfs_lookup(struct inode*,struct dentry*,unsigned int);
 static int memfs_create(struct inode*,struct dentry*,umode_t,bool);
+static int memfs_unlink(struct inode*, struct dentry*);
 //file operations.
 static int memfs_open(struct inode*,struct file*);
 static struct inode* memfs_iget(struct super_block*,const struct inode*,
-                                unsigned long,umode_t);
+                                umode_t);
 static ssize_t memfs_read(struct file*, char __user*, size_t, loff_t*);
-static ssize_t memfs_write_iter(struct kiocb*, struct iov_iter*);
 static int memfs_readdir(struct file*, struct dir_context*);
 // address space operations
 static int memfs_readpage(struct file*, struct page*);
@@ -60,7 +61,8 @@ struct super_operations memfs_super_operations = {
  */
 struct inode_operations memfs_dir_inode_operations = {
     .lookup = memfs_lookup,
-    .create = memfs_create
+    .create = memfs_create,
+    .unlink = memfs_unlink
 };
 struct inode_operations memfs_file_inode_operations = {
     .setattr = simple_setattr,
@@ -68,7 +70,7 @@ struct inode_operations memfs_file_inode_operations = {
 };
 
 struct address_space_operations memfs_aops = {
-    .readpage    = simple_readpage,
+    .readpage    = memfs_readpage,
     .write_begin = memfs_write_begin,
     .write_end   = memfs_write_end,
     .set_page_dirty = memfs_set_page_dirty
@@ -93,7 +95,6 @@ const struct file_operations memfs_dir_operations = {
      * on a directory(weird!).
      * hence Attaching our readdir function here.
      */
-    //.iterate_shared = memfs_readdir
     .iterate_shared  = memfs_readdir
 };
 /*
@@ -111,19 +112,17 @@ static struct dentry* memfs_mount(struct file_system_type* fs,int flags,
  *  data: mount options passed to superblock filler function.
  */
 static int memfs_fill_super(struct super_block* sb,void* data,int flags) {
-    unsigned long i_ino;
     DEBUG("Inside memfs_fill_super\n");
     sb->s_blocksize      = PAGE_SIZE;
     sb->s_blocksize_bits = PAGE_SHIFT;
     sb->s_type           = &memfs;
     sb->s_magic          = MEMFS_MAGIC;
     sb->s_op             = &memfs_super_operations;
-    i_ino                = get_next_ino();
-    root_ino             = i_ino;
-    DEBUG("Inode number assigned to root: %lu \n", i_ino);
-    memfs_root_inode     = memfs_iget(sb, NULL, i_ino,
-                            S_IFDIR|MEMFS_DEFAULT_FILEMODE);
 
+	memfs_root_inode     = memfs_iget(sb, NULL,
+                            S_IFDIR | MEMFS_DEFAULT_FILEMODE);
+    root_ino = memfs_root_inode->i_ino;
+    DEBUG("Inode number assigned to root: %lu \n", root_ino);
     if(!(sb->s_root = d_make_root(memfs_root_inode))) {
         iput(memfs_root_inode);
         DEBUG("%sfailed to allocate dentry\n",__FUNCTION__);
@@ -141,30 +140,39 @@ static int memfs_fill_super(struct super_block* sb,void* data,int flags) {
  * iget_locked.Filesystem may maintain an internal inode cache for
  * peformance increase.
  */
-static struct inode* memfs_iget(struct super_block* sb,const struct inode *dir,
-                                        unsigned long i_no,umode_t flags) {
-    struct inode *ip;
-    DEBUG("Inside:%s i_no = %lu\n", __FUNCTION__, i_no);
-    ip = iget_locked(sb,i_no);
-    if(!ip) {
-        DEBUG("%s:Error allocating the inode\n", __FUNCTION__);
-        return ERR_PTR(-ENOMEM);
-    } else if(!(ip->i_state & I_NEW)) {
-        DEBUG("%s:Returning an existing inode\n", __FUNCTION__);
-        return ip;
-    }
-    inode_init_owner(ip,dir,flags);
-    DEBUG("iget_locked excuted successfully.\n");
-    DEBUG("Inode number assigned is: %lu",i_no);
-    ip->i_atime = ip->i_mtime = ip->i_ctime = current_time(ip);
-    if((flags & S_IFMT) == S_IFDIR) {
-        DEBUG("Filling a directory inode %lu\n", ip->i_ino);
-        ip->i_fop = &memfs_dir_operations;
-        ip->i_op = &memfs_dir_inode_operations;
-    }
-    unlock_new_inode(ip);
-    return ip; 
+static struct inode* memfs_iget(struct super_block *sb, const struct inode *dir,
+			umode_t flags) {
+	struct inode *ip;
+	DEBUG("%s\n", __FUNCTION__);
+	ip = new_inode(sb);
+	if(ip) {
+		ip->i_ino = get_next_ino();
+		DEBUG("%s: New inode created. ip = %lu\n", __FUNCTION__, ip->i_ino);
+		inode_init_owner(ip, dir, flags);
+		ip->i_mapping->a_ops = &memfs_aops;
+		mapping_set_gfp_mask(ip->i_mapping, GFP_HIGHUSER);
+		ip->i_atime = ip->i_ctime = ip->i_mtime = current_time(ip);
+		switch (flags & S_IFMT) {
+			case S_IFREG:
+				DEBUG("%s: ip = %lu mode = reg\n", __FUNCTION__, ip->i_ino);
+				ip->i_fop = &memfs_file_operations;
+				ip->i_op = &memfs_file_inode_operations;
+				break;
+			case S_IFDIR:
+				DEBUG("%s: ip = %lu mode = dir\n", __FUNCTION__, ip->i_ino);
+				ip->i_fop = &memfs_dir_operations;
+				ip->i_op = &memfs_dir_inode_operations;
+				inc_nlink(ip);
+				break;
+		}
+
+	}
+	else {
+		DEBUG("%s:error allocating new inode\n", __FUNCTION__);
+	}
+	return ip;
 }
+
 
 /* memfs_lookup:inode lookup function
  * first argument is directory inode.Second argument is dentry object to which
@@ -181,11 +189,7 @@ static struct inode* memfs_iget(struct super_block* sb,const struct inode *dir,
 static struct dentry* memfs_lookup(struct inode* dir,struct dentry* entry,
                                     unsigned int flags) {
     struct inode *ip;
-    DEBUG("Inside: %s\n", __FUNCTION__);
-    DEBUG("Looking for file with name %s \n", entry->d_iname);
-    if(dir->i_ino != root_ino) {
-        DEBUG("%s:Error in memfs_lookup\n", __FUNCTION__);
-    }
+    DEBUG("%s file = %s\n", __FUNCTION__, dentry->d_iname);
     if(!entry->d_sb->s_d_op) {
         DEBUG("%s not a valid entry: %s", __FUNCTION__, entry->d_name.name);
         d_set_d_op(entry, &simple_dentry_operations);
@@ -211,26 +215,38 @@ static struct dentry* memfs_lookup(struct inode* dir,struct dentry* entry,
 static int memfs_create(struct inode *dir,struct dentry *entry,umode_t mode,
                         bool excl) {
     struct inode *ip;
-    DEBUG("Inside: %s\n",__FUNCTION__);
-    ip = new_inode(dir->i_sb);
-    DEBUG("mode is %o \n", mode);
+    DEBUG("%s file = %s\n",__FUNCTION__, entry->d_iname);
+	ip = memfs_iget(dir->i_sb, dir, mode);
     if(ip) {
-        ip->i_ino = get_next_ino();
-        mapping_set_gfp_mask(ip->i_mapping, GFP_HIGHUSER);
-        inode_init_owner(ip, dir, mode | S_IFREG);
         DEBUG("%s: Filling a regular file inode %lu \n",__FUNCTION__, ip->i_ino);
-        ip->i_op = &memfs_file_inode_operations;
-        ip->i_fop = &memfs_file_operations;
-        ip->i_mapping->a_ops = &memfs_aops;
         d_instantiate(entry,ip);
         dget(entry);
-        dir->i_mtime = dir->i_ctime = current_time(dir);
     } else {
        DEBUG("%s:Error creating inode\n",__FUNCTION__);
        return -ENOMEM;
     }
     return 0;
 }
+
+/* memfs_unlink.
+ * dp : inode from directory.
+ * entry : dentry obj of file to delete.
+ *
+ * unlink is:
+ * 		1.decreament the ref count of inode.
+ * 		2.put down the dentry object (from dcache).
+ * 		3.Update different timing fields.
+ */
+
+static int memfs_unlink(struct inode *dp, struct dentry *entry) {
+	DEBUG("%s file = %s\n", __FUNCTION__, entry->d_iname);
+	struct inode *ip = d_inode(entry);
+	drop_nlink(ip);
+	ip->i_ctime = dp->i_ctime = dp->i_mtime = current_time(ip);
+	dput(entry);
+	return 0;
+}
+
 /* 
  * Called during unmounting of  FS.
  */
@@ -408,12 +424,6 @@ static int memfs_set_page_dirty(struct page* page) {
         return !TestSetPageDirty(page);
     }
     return 0;
-}
-
-static ssize_t memfs_write_iter(struct kiocb *kiocb, struct iov_iter *i) {
-    DEBUG("Inside %s \n", __FUNCTION__);
-    DEBUG("Number of vectors %lu \n", i->count);
-    return generic_file_write_iter(kiocb, i);
 }
 
 static int init_memfs_module(void) {
